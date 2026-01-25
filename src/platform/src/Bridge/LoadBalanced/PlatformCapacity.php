@@ -19,11 +19,11 @@ use Symfony\AI\Platform\PlatformInterface;
  *
  * @author Paul Clegg <hello@clegginabox.co.uk>
  */
-final readonly class PlatformCapacity
+final class PlatformCapacity
 {
     public function __construct(
-        public PlatformInterface $platform,
-        public CapacityProvider $capacityProvider,
+        public readonly PlatformInterface $platform,
+        public readonly CapacityProvider $capacityProvider,
     ) {
     }
 }
