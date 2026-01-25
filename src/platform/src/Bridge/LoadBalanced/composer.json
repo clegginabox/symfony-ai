@@ -25,8 +25,14 @@
     "require": {
         "php": ">=8.2",
         "symfony/ai-platform": "^0.3",
-        "symfony/rate-limiter": "^8.0",
-        "symfony/semaphore": "^8.0"
+        "symfony/rate-limiter": "^7.3|^8.0",
+        "symfony/semaphore": "^7.3|^8.0"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.1",
+        "phpstan/phpstan-phpunit": "^2.0",
+        "phpstan/phpstan-strict-rules": "^2.0",
+        "phpunit/phpunit": "^11.5.46"
     },
     "autoload": {
         "psr-4": {

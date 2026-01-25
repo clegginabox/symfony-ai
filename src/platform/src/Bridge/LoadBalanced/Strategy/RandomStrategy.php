@@ -11,6 +11,8 @@
 
 namespace Symfony\AI\Platform\Bridge\LoadBalanced\Strategy;
 
+use Symfony\AI\Platform\Bridge\LoadBalanced\PlatformCapacity;
+
 /**
  * Randomises the platform selection order.
  *
@@ -18,6 +20,9 @@ namespace Symfony\AI\Platform\Bridge\LoadBalanced\Strategy;
  */
 final class RandomStrategy implements PlatformSelectionStrategy
 {
+    /**
+     * @param array<PlatformCapacity> $platforms
+     */
     public function order(array $platforms): iterable
     {
         shuffle($platforms);
