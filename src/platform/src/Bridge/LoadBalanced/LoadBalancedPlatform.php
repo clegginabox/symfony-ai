@@ -51,12 +51,16 @@ final class LoadBalancedPlatform implements PlatformInterface
 
     public function invoke(string $model, object|array|string $input, array $options = []): DeferredResult
     {
-        return $this->execute(static fn (PlatformInterface $platform): DeferredResult => $platform->invoke($model, $input, $options));
+        return $this->execute(
+            static fn (PlatformCapacity $capacity): DeferredResult => $capacity->platform->invoke($capacity->model ?? $model, $input, $options),
+        );
     }
 
     public function getModelCatalog(): ModelCatalogInterface
     {
-        return $this->execute(static fn (PlatformInterface $platform): ModelCatalogInterface => $platform->getModelCatalog());
+        return $this->execute(
+            static fn (PlatformInterface $platform): ModelCatalogInterface => $platform->getModelCatalog()
+        );
     }
 
     private function execute(\Closure $operation): DeferredResult|ModelCatalogInterface
@@ -67,7 +71,7 @@ final class LoadBalancedPlatform implements PlatformInterface
             }
 
             try {
-                return $operation($entry->platform);
+                return $operation($entry);
             } finally {
                 $entry->capacityProvider->release();
             }
