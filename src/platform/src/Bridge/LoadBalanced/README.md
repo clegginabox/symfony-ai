@@ -1,4 +1,4 @@
-Failover Platform
+Load Balanced Platform
 =================
 
 Load balanced platform bridge for Symfony AI.

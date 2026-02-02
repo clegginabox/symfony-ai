@@ -24,6 +24,7 @@ final class PlatformCapacity
     public function __construct(
         public readonly PlatformInterface $platform,
         public readonly CapacityProvider $capacityProvider,
+        public readonly ?string $model = null,
     ) {
     }
 }
