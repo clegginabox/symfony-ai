@@ -167,6 +167,65 @@ final class DeferredResultTest extends TestCase
         $this->assertSame(123456, $tokenUsage->getPromptTokens());
     }
 
+    public function testOnResolvedCallbackRunsWhenResultGetsResolved()
+    {
+        $resolvedCount = 0;
+        $deferredResult = new DeferredResult(
+            new PlainConverter(new TextResult('resolved')),
+            new InMemoryRawResult(),
+        );
+        $deferredResult->onResolved(static function () use (&$resolvedCount): void {
+            ++$resolvedCount;
+        });
+
+        $this->assertSame(0, $resolvedCount);
+
+        $deferredResult->asText();
+
+        $this->assertSame(1, $resolvedCount);
+    }
+
+    public function testOnResolvedCallbackRunsWhenStreamStopsEarly()
+    {
+        $resolvedCount = 0;
+        $deferredResult = new DeferredResult(
+            new PlainConverter(new StreamResult((static function (): \Generator {
+                yield 'part 1';
+                yield 'part 2';
+            })())),
+            new InMemoryRawResult(),
+        );
+        $deferredResult->onResolved(static function () use (&$resolvedCount): void {
+            ++$resolvedCount;
+        });
+
+        $stream = $deferredResult->asStream();
+        $this->assertTrue($stream->valid());
+        $this->assertSame('part 1', $stream->current());
+        $this->assertSame(0, $resolvedCount);
+
+        unset($stream);
+        gc_collect_cycles();
+
+        $this->assertSame(1, $resolvedCount);
+    }
+
+    public function testOnResolvedCallbackRunsImmediatelyWhenAlreadyResolved()
+    {
+        $resolvedCount = 0;
+        $deferredResult = new DeferredResult(
+            new PlainConverter(new TextResult('resolved')),
+            new InMemoryRawResult(),
+        );
+
+        $deferredResult->asText();
+        $deferredResult->onResolved(static function () use (&$resolvedCount): void {
+            ++$resolvedCount;
+        });
+
+        $this->assertSame(1, $resolvedCount);
+    }
+
     /**
      * Workaround for low deps because mocking the ResponseInterface leads to an exception with
      * mock creation "Type Traversable|object|array|string|null contains both object and a class type"

@@ -14,6 +14,7 @@ namespace Symfony\AI\Platform\Tests\Result;
 use PHPUnit\Framework\TestCase;
 use Symfony\AI\Platform\Result\Stream\AbstractStreamListener;
 use Symfony\AI\Platform\Result\Stream\ChunkEvent;
+use Symfony\AI\Platform\Result\Stream\CompleteEvent;
 use Symfony\AI\Platform\Result\StreamResult;
 
 final class StreamResultTest extends TestCase
@@ -84,5 +85,34 @@ final class StreamResultTest extends TestCase
 
         // After consumption, metadata is populated
         $this->assertTrue($result->getMetadata()->has('seen_chunk2'));
+    }
+
+    public function testOnCompleteRunsWhenStreamingStopsEarly()
+    {
+        $completed = false;
+        $result = new StreamResult((static function () {
+            yield 'chunk1';
+            yield 'chunk2';
+        })());
+        $result->addListener(new class($completed) extends AbstractStreamListener {
+            public function __construct(private bool &$completed) /* @phpstan-ignore property.onlyWritten */
+            {
+            }
+
+            public function onComplete(CompleteEvent $event): void
+            {
+                $this->completed = true;
+            }
+        });
+
+        $stream = $result->getContent();
+        $this->assertTrue($stream->valid());
+        $this->assertSame('chunk1', $stream->current());
+        $this->assertFalse($completed);
+
+        unset($stream);
+        gc_collect_cycles();
+
+        $this->assertTrue($completed);
     }
 }
