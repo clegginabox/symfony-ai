@@ -15,18 +15,22 @@ use PHPUnit\Framework\TestCase;
 use Symfony\AI\Platform\Bridge\LoadBalanced\Exception\CapacityExhaustedException;
 use Symfony\AI\Platform\Bridge\LoadBalanced\LoadBalancedPlatform;
 use Symfony\AI\Platform\Bridge\LoadBalanced\PlatformCapacity;
+use Symfony\AI\Platform\Bridge\LoadBalanced\Provider\ConcurrencyLimitedProvider;
 use Symfony\AI\Platform\Bridge\LoadBalanced\Provider\NoLimitCapacityProvider;
 use Symfony\AI\Platform\Bridge\LoadBalanced\Provider\RateLimitedCapacityProvider;
 use Symfony\AI\Platform\Bridge\LoadBalanced\Strategy\PlatformSelectionStrategy;
 use Symfony\AI\Platform\Bridge\LoadBalanced\Strategy\RandomStrategy;
 use Symfony\AI\Platform\Exception\InvalidArgumentException;
+use Symfony\AI\Platform\ModelCatalog\ModelCatalogInterface;
 use Symfony\AI\Platform\PlatformInterface;
 use Symfony\AI\Platform\Result\DeferredResult;
 use Symfony\AI\Platform\Result\RawResultInterface;
+use Symfony\AI\Platform\Result\StreamResult;
 use Symfony\AI\Platform\ResultConverterInterface;
 use Symfony\AI\Platform\Test\InMemoryPlatform;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
 use Symfony\Component\RateLimiter\Storage\InMemoryStorage;
+use Symfony\Component\Semaphore\SemaphoreInterface;
 
 class LoadBalancedPlatformTest extends TestCase
 {
@@ -59,17 +63,37 @@ class LoadBalancedPlatformTest extends TestCase
     {
         $loadBalancedPlatform = new LoadBalancedPlatform([
             new PlatformCapacity(
-                new InMemoryPlatform(static fn(): string => 'foo'),
+                new InMemoryPlatform(static fn (): string => 'foo'),
                 new NoLimitCapacityProvider(),
             ),
         ], new RandomStrategy());
 
         $result = $loadBalancedPlatform->invoke('gpt-4', 'input');
 
-        $this->assertSame('foo', $result->asText());
+        self::assertSame('foo', $result->asText());
     }
 
-    public function testUsesPlatformSpecificModelWhenProvided(): void
+    public function testGetsModelCatalogFromPlatform()
+    {
+        $catalog = $this->createMock(ModelCatalogInterface::class);
+        $platform = $this->createMock(PlatformInterface::class);
+
+        $platform
+            ->expects($this->once())
+            ->method('getModelCatalog')
+            ->willReturn($catalog);
+
+        $loadBalancedPlatform = new LoadBalancedPlatform([
+            new PlatformCapacity(
+                $platform,
+                new NoLimitCapacityProvider(),
+            ),
+        ], new RandomStrategy());
+
+        self::assertSame($catalog, $loadBalancedPlatform->getModelCatalog());
+    }
+
+    public function testUsesPlatformSpecificModelWhenProvided()
     {
         $platform = $this->createMock(PlatformInterface::class);
 
@@ -141,6 +165,51 @@ class LoadBalancedPlatformTest extends TestCase
         $platform->invoke('model', 'input');
     }
 
+    public function testReleasesConcurrencyTokenAfterDeferredResultResolves()
+    {
+        $releaseCounter = new \ArrayObject(['count' => 0]);
+        $semaphore = $this->createSemaphore($releaseCounter);
+
+        $loadBalancedPlatform = new LoadBalancedPlatform([
+            new PlatformCapacity(
+                new InMemoryPlatform(static fn (): string => 'foo'),
+                new ConcurrencyLimitedProvider($semaphore),
+            ),
+        ], new RandomStrategy());
+
+        $deferredResult = $loadBalancedPlatform->invoke('model', 'input');
+
+        self::assertSame(0, (int) $releaseCounter['count']);
+        self::assertSame('foo', $deferredResult->asText());
+        self::assertSame(1, (int) $releaseCounter['count']);
+    }
+
+    public function testReleasesConcurrencyTokenAfterStreamStopsEarly()
+    {
+        $releaseCounter = new \ArrayObject(['count' => 0]);
+        $semaphore = $this->createSemaphore($releaseCounter);
+
+        $loadBalancedPlatform = new LoadBalancedPlatform([
+            new PlatformCapacity(
+                new InMemoryPlatform(static fn (): StreamResult => new StreamResult((static function (): \Generator {
+                    yield 'chunk1';
+                    yield 'chunk2';
+                })())),
+                new ConcurrencyLimitedProvider($semaphore),
+            ),
+        ], new RandomStrategy());
+
+        $stream = $loadBalancedPlatform->invoke('model', 'input')->asStream();
+        self::assertTrue($stream->valid());
+        self::assertSame('chunk1', $stream->current());
+        self::assertSame(0, (int) $releaseCounter['count']);
+
+        unset($stream);
+        gc_collect_cycles();
+
+        self::assertSame(1, (int) $releaseCounter['count']);
+    }
+
     private function createDeferredResult(): DeferredResult
     {
         return new DeferredResult(
@@ -152,10 +221,31 @@ class LoadBalancedPlatformTest extends TestCase
     private function createRateLimiter(int $limit): RateLimiterFactory
     {
         return new RateLimiterFactory([
-            'policy'   => 'fixed_window',
+            'policy' => 'fixed_window',
             'interval' => '1 minute',
-            'limit'    => $limit,
-            'id'       => 'test',
+            'limit' => $limit,
+            'id' => 'test',
         ], new InMemoryStorage());
+    }
+
+    /**
+     * @param \ArrayObject<string, int> $releaseCounter
+     */
+    private function createSemaphore(\ArrayObject $releaseCounter): SemaphoreInterface
+    {
+        $semaphore = $this->createMock(SemaphoreInterface::class);
+        $semaphore
+            ->expects($this->once())
+            ->method('acquire')
+            ->willReturn(true);
+
+        $semaphore
+            ->expects($this->once())
+            ->method('release')
+            ->willReturnCallback(static function () use ($releaseCounter): void {
+                ++$releaseCounter['count'];
+            });
+
+        return $semaphore;
     }
 }

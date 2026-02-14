@@ -59,7 +59,7 @@ final class LoadBalancedPlatform implements PlatformInterface
     public function getModelCatalog(): ModelCatalogInterface
     {
         return $this->execute(
-            static fn (PlatformInterface $platform): ModelCatalogInterface => $platform->getModelCatalog()
+            static fn (PlatformCapacity $capacity): ModelCatalogInterface => $capacity->platform->getModelCatalog()
         );
     }
 
@@ -71,10 +71,24 @@ final class LoadBalancedPlatform implements PlatformInterface
             }
 
             try {
-                return $operation($entry);
-            } finally {
+                $result = $operation($entry);
+            } catch (\Throwable $throwable) {
                 $entry->capacityProvider->release();
+
+                throw $throwable;
             }
+
+            if (!$result instanceof DeferredResult) {
+                $entry->capacityProvider->release();
+
+                return $result;
+            }
+
+            $result->onResolved(static function () use ($entry): void {
+                $entry->capacityProvider->release();
+            });
+
+            return $result;
         }
 
         throw new CapacityExhaustedException('All platforms have exhausted their capacity.');
